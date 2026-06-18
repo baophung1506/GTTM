@@ -1,0 +1,10 @@
+{
+    "zones": [
+        {
+            "id": "no_park_1",
+            "name": "Cấm đỗ xe trước cổng",
+            "polygon": [[200, 400], [500, 400], [500, 720], [200, 720]],
+            "max_stationary_seconds": 30
+        }
+    ]
+}

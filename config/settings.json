@@ -1,0 +1,46 @@
+{
+    "video": {
+        "loop": false,
+        "scale_factor": 1.0
+    },
+    "models": {
+        "vehicle_model_path": "resources/yolov8n.pt",
+        "helmet_model_path": "resources/helmet_model.pt",
+        "confidence": 0.45,
+        "iou": 0.5,
+        "device": "cpu",
+        "class_names": ["person", "bicycle", "car", "motorcycle", "bus", "truck"]
+    },
+    "tracking": {
+        "track_thresh": 0.5,
+        "track_buffer": 30,
+        "match_thresh": 0.8,
+        "frame_rate": 30
+    },
+    "violations": {
+        "cooldown_seconds": 10,
+        "stop_line_margin": 5
+    },
+    "ocr": {
+        "languages": ["vi", "en"],
+        "use_gpu": false,
+        "min_confidence": 0.5
+    },
+    "email": {
+        "sender": "sender@gmail.com",
+        "recipient": "recipient@gmail.com",
+        "smtp_server": "smtp.gmail.com",
+        "smtp_port": 587,
+        "password": ""
+    },
+    "database": {
+        "path": "database/traffic.db"
+    },
+    "ui": {
+        "theme": "dark"
+    },
+    "storage": {
+        "violation_images_dir": "violations/images",
+        "violation_logs_dir": "violations/logs"
+    }
+}

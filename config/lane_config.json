@@ -1,0 +1,25 @@
+{
+    "lanes": [
+        {
+            "id": "lane_1",
+            "name": "Làn xe máy (trái)",
+            "polygon": [[0, 200], [320, 200], [320, 720], [0, 720]],
+            "allowed_classes": ["motorcycle"],
+            "direction_degrees": 270
+        },
+        {
+            "id": "lane_2",
+            "name": "Làn xe hỗn hợp (giữa)",
+            "polygon": [[320, 200], [640, 200], [640, 720], [320, 720]],
+            "allowed_classes": ["motorcycle", "car"],
+            "direction_degrees": 270
+        },
+        {
+            "id": "lane_3",
+            "name": "Làn xe ô tô (phải)",
+            "polygon": [[640, 200], [1280, 200], [1280, 720], [640, 720]],
+            "allowed_classes": ["car", "bus"],
+            "direction_degrees": 270
+        }
+    ]
+}
