@@ -13,6 +13,11 @@ So do luong tin hieu:
     ViolationManager --violation_detected-> ViolationPanel + ImagePreviewPanel
     DatabaseManager  --violation_saved-->   ViolationPanel (cap nhat ID thuc)
     EmailManager     --email_status_changed-> ViolationPanel
+
+NGUON DAU VAO: Video file / Anh tinh / Webcam (camera truc tiep), chon
+qua nut dropdown "Chọn Nguồn" tren toolbar. Ca 3 nguon deu dung chung
+VideoManager.load_source() (anh tinh duoc xu ly nhu video 1 frame duy
+nhat, webcam dung index camera thay vi duong dan file).
 """
 
 import os
@@ -20,9 +25,10 @@ import os
 from PyQt5.QtCore import Qt, QTimer, pyqtSlot
 from PyQt5.QtGui import QFont, QIcon
 from PyQt5.QtWidgets import (QAction, QApplication, QFileDialog, QGroupBox,
-                              QHBoxLayout, QLabel, QMainWindow, QMessageBox,
-                              QSizePolicy, QSplitter, QStatusBar, QToolBar,
-                              QVBoxLayout, QWidget)
+                              QHBoxLayout, QInputDialog, QLabel, QMainWindow,
+                              QMenu, QMessageBox, QSizePolicy, QSplitter,
+                              QStatusBar, QToolBar, QToolButton, QVBoxLayout,
+                              QWidget)
 
 from core.config_manager import ConfigManager
 from core.database_manager import DatabaseManager
@@ -60,7 +66,10 @@ class MainWindow(QMainWindow):
             languages=self._cfg.get("ocr.languages", ["vi", "en"]),
             use_gpu=self._cfg.get("ocr.use_gpu", False),
             min_confidence=self._cfg.get("ocr.min_confidence", 0.5),
+            plate_model_path=self._cfg.get("ocr.plate_model_path", None),
+            plate_confidence=self._cfg.get("ocr.plate_confidence", 0.4),
         )
+
         self._email_manager = EmailManager(
             database_manager=self._db_manager,
             sender=self._cfg.get("email.sender", default=""),
@@ -93,6 +102,12 @@ class MainWindow(QMainWindow):
         )
 
         # ----------------------------------------------------------------
+        # Trang thai nguon dau vao hien tai ("video" | "image" | "camera")
+        # ----------------------------------------------------------------
+        self._current_source_type = "video"
+        self._current_source_label = "Chưa chọn nguồn"
+
+        # ----------------------------------------------------------------
         # Xay dung giao dien
         # ----------------------------------------------------------------
         self._setup_window()
@@ -111,7 +126,7 @@ class MainWindow(QMainWindow):
         self._tracking_manager.start()
 
         self._logger.log_info(source="MainWindow", message="He thong khoi dong thanh cong.")
-        self._set_status("Sẵn sàng. Chọn video để bắt đầu.")
+        self._set_status("Sẵn sàng. Chọn nguồn (Video / Ảnh / Camera) để bắt đầu.")
 
     # ================================================================
     # Setup GUI
@@ -130,9 +145,31 @@ class MainWindow(QMainWindow):
         self.addToolBar(tb)
 
         tb.addWidget(QLabel("  📂 "))
-        self._act_open = QAction("Chọn Video", self)
-        self._act_open.triggered.connect(self._open_video)
-        tb.addAction(self._act_open)
+
+        # ---- Nut dropdown chon nguon: Video / Anh / Camera ----
+        # (thay the nut "Chon Video" don le truoc day; giu nguyen vi tri
+        # va phong cach hien thi tren toolbar)
+        self._btn_source = QToolButton(self)
+        self._btn_source.setText("Chọn Nguồn ▾")
+        self._btn_source.setPopupMode(QToolButton.InstantPopup)
+        self._btn_source.setToolButtonStyle(Qt.ToolButtonTextOnly)
+
+        source_menu = QMenu(self._btn_source)
+
+        act_open_video = QAction("🎬  Chọn Video...", self)
+        act_open_video.triggered.connect(self._open_video)
+        source_menu.addAction(act_open_video)
+
+        act_open_image = QAction("🖼️  Chọn Ảnh...", self)
+        act_open_image.triggered.connect(self._open_image)
+        source_menu.addAction(act_open_image)
+
+        act_open_camera = QAction("📷  Mở Camera (Webcam)...", self)
+        act_open_camera.triggered.connect(self._open_camera)
+        source_menu.addAction(act_open_camera)
+
+        self._btn_source.setMenu(source_menu)
+        tb.addWidget(self._btn_source)
 
         tb.addSeparator()
 
@@ -157,7 +194,7 @@ class MainWindow(QMainWindow):
 
         tb.addSeparator()
 
-        self._lbl_video_path = QLabel("  Chưa chọn video")
+        self._lbl_video_path = QLabel("  Chưa chọn nguồn")
         self._lbl_video_path.setStyleSheet("color: #a0a0c0;")
         tb.addWidget(self._lbl_video_path)
 
@@ -335,7 +372,10 @@ class MainWindow(QMainWindow):
 
     @pyqtSlot()
     def _on_video_finished(self) -> None:
-        self._set_status("Video kết thúc.")
+        if self._current_source_type == "image":
+            self._set_status("Đã xử lý xong ảnh.")
+        else:
+            self._set_status("Video kết thúc.")
         self._act_start.setEnabled(True)
         self._act_pause.setEnabled(False)
         self._act_stop.setEnabled(False)
@@ -346,10 +386,11 @@ class MainWindow(QMainWindow):
         self._set_status(f"Lỗi: {message}")
 
     # ================================================================
-    # Dieu khien phat lai
+    # Dieu khien phat lai - Chon nguon dau vao
     # ================================================================
 
     def _open_video(self) -> None:
+        """Mo hop thoai chon file video MP4/AVI/MKV..."""
         path, _ = QFileDialog.getOpenFileName(
             self, "Chọn file video",
             os.path.expanduser("~"),
@@ -358,11 +399,67 @@ class MainWindow(QMainWindow):
         if not path:
             return
 
-        self._video_manager.load_video(path)
-        short_name = os.path.basename(path)
-        self._lbl_video_path.setText(f"  📹 {short_name}")
+        self._load_source(source_path=path, source_type="video", display_name=os.path.basename(path))
+
+    def _open_image(self) -> None:
+        """
+        Mo hop thoai chon 1 file anh tinh (jpg/png...).
+        Anh duoc xu ly nhu video 1 frame duy nhat, chay qua dung pipeline
+        Detection -> Tracking -> Violation -> OCR nhu video binh thuong.
+        """
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Chọn file ảnh",
+            os.path.expanduser("~"),
+            "Image files (*.jpg *.jpeg *.png *.bmp *.webp);;All files (*)",
+        )
+        if not path:
+            return
+
+        self._load_source(source_path=path, source_type="image", display_name=os.path.basename(path))
+
+    def _open_camera(self) -> None:
+        """
+        Mo hop thoai nhap index camera (thuong la 0 cho webcam mac dinh),
+        roi mo camera nhu mot nguon video truc tiep (VideoManager nhan
+        index camera thay vi duong dan file, OpenCV xu ly giong nhau qua
+        cv2.VideoCapture).
+        """
+        index, ok = QInputDialog.getInt(
+            self, "Mở Camera",
+            "Nhập chỉ số camera (thường là 0 cho webcam mặc định):",
+            value=0, min=0, max=10,
+        )
+        if not ok:
+            return
+
+        self._load_source(
+            source_path=index, source_type="camera",
+            display_name=f"Webcam #{index} (trực tiếp)",
+        )
+
+    def _load_source(self, source_path, source_type: str, display_name: str) -> None:
+        """
+        Ham dung chung de nap nguon du lieu (video / anh / camera) vao
+        VideoManager. Voi anh tinh, VideoManager se phat ra dung 1 frame
+        roi tu dong ket thuc (video_finished), giong het luong xu ly video
+        nhung chi co 1 frame duy nhat.
+        """
+        success = self._video_manager.load_source(source_path, source_type=source_type)
+        if not success:
+            QMessageBox.warning(
+                self, "Lỗi nguồn đầu vào",
+                f"Không thể mở: {display_name}\n"
+                "Vui lòng kiểm tra lại đường dẫn file hoặc chỉ số camera.",
+            )
+            return
+
+        self._current_source_type = source_type
+        self._current_source_label = display_name
+
+        icon = {"video": "🎬", "image": "🖼️", "camera": "📷"}.get(source_type, "📹")
+        self._lbl_video_path.setText(f" {icon} {display_name}")
         self._act_start.setEnabled(True)
-        self._set_status(f"Đã chọn: {short_name}")
+        self._set_status(f"Đã chọn {source_type}: {display_name}")
 
     def _start_processing(self) -> None:
         if not self._video_manager.isRunning():
@@ -370,9 +467,15 @@ class MainWindow(QMainWindow):
         else:
             self._video_manager.resume()
         self._act_start.setEnabled(False)
-        self._act_pause.setEnabled(True)
+        self._act_pause.setEnabled(self._current_source_type != "image")
         self._act_stop.setEnabled(True)
-        self._set_status("Đang giám sát...")
+
+        if self._current_source_type == "image":
+            self._set_status("Đang xử lý ảnh...")
+        elif self._current_source_type == "camera":
+            self._set_status("Đang giám sát trực tiếp từ camera...")
+        else:
+            self._set_status("Đang giám sát...")
 
     def _pause_processing(self) -> None:
         self._video_manager.pause()
@@ -398,8 +501,10 @@ class MainWindow(QMainWindow):
         self._act_start.setEnabled(False)
         self._act_pause.setEnabled(False)
         self._act_stop.setEnabled(False)
-        self._lbl_video_path.setText("  Chưa chọn video")
-        self._set_status("Đã reset. Chọn video để bắt đầu lại.")
+        self._lbl_video_path.setText("  Chưa chọn nguồn")
+        self._current_source_type = "video"
+        self._current_source_label = "Chưa chọn nguồn"
+        self._set_status("Đã reset. Chọn nguồn (Video / Ảnh / Camera) để bắt đầu lại.")
 
     def _set_status(self, msg: str) -> None:
         self._status_bar.showMessage(msg, 8000)
@@ -410,7 +515,7 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:
         """Dung an toan tat ca cac thread truoc khi dong cua so."""
-        self._logger.log_info("Dang dong ung dung...")
+        self._logger.log_info("MainWindow", "Dang dong ung dung...")
 
         self._video_manager.stop()
         self._detection_manager.stop()
@@ -420,5 +525,5 @@ class MainWindow(QMainWindow):
         self._db_manager.stop()
         self._traffic_light_panel.cleanup()
 
-        self._logger.log_info("Ung dung da dong an toan.")
+        self._logger.log_info("MainWindow", "Ung dung da dong an toan.")
         event.accept()
